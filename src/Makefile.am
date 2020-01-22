@@ -1,4 +1,4 @@
-lib_LTLIBRARIES = webhelper.la
+lib_LTLIBRARIES = libwebhelper.la
 include_HEADERS = webhelper.hpp
-webhelper_la_SOURCES = webhelper.cpp
-webhelper_la_CXXFLAGS = -std=c++11
+libwebhelper_la_SOURCES = webhelper.cpp
+libwebhelper_la_CXXFLAGS = -std=c++11
