@@ -18,3 +18,10 @@ Take a look at the examples too see a better explanation on how to use it.
 make
 sudo make install
 ```
+
+You may need to also create a link to `/usr/lib/` and reload `ldconfig`:
+
+```
+sudo ln -s /usr/local/lib/libwebhelper.* /usr/lib/
+sudo ldconfig -v
+```
