@@ -14,6 +14,8 @@ Take a look at the examples too see a better explanation on how to use it.
 
 ## Installation
 
+***You'd need to have OpenSSL installed in your system.***
+
 ```
 make
 sudo make install
