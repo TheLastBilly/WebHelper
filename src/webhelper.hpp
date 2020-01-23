@@ -1,4 +1,4 @@
-// WebHelper - webhelper.hpp
+// OpenRooms - webhelper.hpp
 //
 // Copyright (c) 2020, TheLastBilly
 // All rights reserved.
@@ -24,6 +24,10 @@
 #include <netinet/in.h> 
 #include <arpa/inet.h> 
 
+#include <openssl/bio.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+
 class WebHelper
 {
 public:
@@ -36,10 +40,18 @@ public:
         NETWORK_SEND_ERROR,
         NETWORK_RECEIVED_ERROR,
         RESPONSE_BUFFER_FULL_ERROR,
+        SSL_CERTIFICATE_ERROR,
+        SSL_ACCEPT_ERROR,
         NO_RESPONSE,
         NOT_CONNECTED,
         NOT_INIT,
         A_OK
+    };
+
+    enum ConnectionType
+    {
+        HTTP,
+        HTTPS
     };
 
     enum RequestType
@@ -47,21 +59,16 @@ public:
         GET,
         POST
     };
+    
     struct Header
     {
         std::string
             name, content;
     };
     typedef std::vector<WebHelper::Header> HeaderList;
-    std::string url;
-    StatusType status = A_OK;
-    bool 
-        is_init = false,
-        is_connected = false,
-        has_response = false;
 
-    WebHelper( std::string domain );
-    WebHelper( );
+    WebHelper( std::string domain, ConnectionType type );
+    WebHelper( ConnectionType type );
     ~WebHelper();
 
     //Initialize WebHelper object
@@ -108,13 +115,47 @@ public:
     std::string GetResponse();
     
     //Retreive headers from response
-    static WebHelper::HeaderList ParseHeaders( std::string raw );
+    static WebHelper::HeaderList ParseHeaders( std::istream &raw );
+
+    //Socket Handlers for HTTP/HTTPS
+    class SocketHandler
+    {
+    public:
+        SocketHandler();
+        virtual ~SocketHandler();
+        virtual StatusType Init( int fd );
+        StatusType End();
+        virtual size_t WriteToSocket( int fd, const void * buf, size_t n );
+        virtual size_t ReadFromSocket(int fd, void * buf, size_t n, int flags );
+        int sckt;
+        StatusType status = A_OK;
+        bool is_init = false;
+    };
+
+    class SslSocketHandler : public SocketHandler
+    {
+    public:
+        SslSocketHandler( );
+        ~SslSocketHandler( );
+        StatusType Init( int fd ) override;
+        StatusType End();
+        size_t WriteToSocket( int fd, const void * buf, size_t n ) override;
+        size_t ReadFromSocket(int fd, void * buf, size_t n, int flags ) override;
+        static void InitSsl();
+        static void EndSsl();
+        int sckt;
+        SSL_CTX * ssl_ctx = nullptr;
+        SSL * c_ssl = nullptr;
+
+    };
     
 private:
+
     //Networking
     struct addrinfo honstname_addr = {};
     static const int 
         HTTP_PORT = 80,
+        HTTPS_PORT = 443,
         IP_MAX_BUFFER = 18,
         MAX_RESPONSE_BUFFER = 8192000,
         MAX_REQUEST_BUFFER = 1024;
@@ -125,14 +166,26 @@ private:
         hostname_ip[IP_MAX_BUFFER] = {0},
         response_buffer[MAX_RESPONSE_BUFFER] = {0},
         request_buffer[MAX_REQUEST_BUFFER] = {0};
-
-    //Create a socket based on a hostname
-    StatusType OpenSocketToHostname();
-
     int 
         tcp_bytes_moved = 0, 
         tbm = 0,
-        request_size = 0;
+        request_size = 0,
+        current_port = HTTP_PORT;
+
+    //Internals
+    std::string url;
+    StatusType status = A_OK;
+    ConnectionType connection_type = HTTP;
+    bool 
+        is_init = false,
+        is_connected = false,
+        has_response = false;
+    SocketHandler * socket_handler = nullptr;
+
+    //Create a socket based on a hostname
+    StatusType OpenSocketToHostname();
+    
+    void SetConnectionType( ConnectionType type );
 };
 
 #endif

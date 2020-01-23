@@ -4,7 +4,7 @@
 
 int main(int argc, char const *argv[])
 {
-    WebHelper web("www.example.com");
+    WebHelper web("www.example.com", WebHelper::HTTP);
     if(
         web.GetStatus() != WebHelper::A_OK || 
         web.RequestPage("index.html") != WebHelper::A_OK

@@ -1,4 +1,4 @@
-// WebHelper - webhelper.cpp
+// OpenRooms - web.cpp
 //
 // Copyright (c) 2020, TheLastBilly
 // All rights reserved.
@@ -11,22 +11,48 @@
 const char *WebHelper::HttpRequestTemplate = 
     "%s /%s HTTP/1.0\r\nHost: %s\r\n%s\r\n%s";
 
-WebHelper::WebHelper( std::string host ):
+void WebHelper::SetConnectionType( ConnectionType type )
+{
+    switch(type)
+    {
+        case HTTP:
+            socket_handler = new SocketHandler( );
+            current_port = HTTP_PORT;
+            break;
+        case HTTPS:
+            socket_handler = new SslSocketHandler();
+            current_port = HTTPS_PORT;
+            break;
+    }
+    connection_type = type;
+    status = socket_handler->status;
+}
+
+WebHelper::WebHelper( std::string host, ConnectionType type ):
 url( host )
 {
+    SetConnectionType( type );
     Init();
 }
 
-WebHelper::WebHelper( )
-{}
+WebHelper::WebHelper( ConnectionType type )
+{
+    SetConnectionType(type);
+}
 
 WebHelper::~WebHelper( )
 {
     End();
+    if(socket_handler != nullptr)
+    {
+        delete socket_handler;
+    }
 }
 
 WebHelper::StatusType WebHelper::Init()
 {
+    if(status != A_OK)
+        return status;
     if(is_init)
     {
         End();
@@ -160,7 +186,7 @@ WebHelper::StatusType WebHelper::SendRequest(std::string request, int request_le
     tcp_bytes_moved = 0, tbm = 0;
     do{
         tbm = 
-            write( sckt, rq_ptr + tcp_bytes_moved, request_len - tcp_bytes_moved );
+            socket_handler->WriteToSocket( sckt, rq_ptr + tcp_bytes_moved, request_len - tcp_bytes_moved );
         if(tbm < 0)
             return (status = NETWORK_SEND_ERROR);
         else if(tbm == 0)
@@ -177,7 +203,7 @@ WebHelper::StatusType WebHelper::ReceiveResponse()
     memset(response_buffer, 0, MAX_RESPONSE_BUFFER);
     do{
         tbm = 
-            recv( sckt, response_buffer + tcp_bytes_moved, MAX_RESPONSE_BUFFER - tcp_bytes_moved, 0 );
+            socket_handler->ReadFromSocket( sckt, response_buffer + tcp_bytes_moved, MAX_RESPONSE_BUFFER - tcp_bytes_moved, 0 );
         if(tbm < 0)
             return (status = NETWORK_SEND_ERROR);
         else if(tbm == 0)
@@ -197,6 +223,10 @@ WebHelper::StatusType WebHelper::ReceiveResponse()
 
 WebHelper::StatusType WebHelper::OpenSocketToHostname( )
 {
+    if(url.size() < 1)
+    {
+        return (status = NO_HOSTNAME_ERROR);
+    }
     memset( hostname_ip, 0, sizeof(char) * IP_MAX_BUFFER );
 
     struct addrinfo *addr_list, hints = {};
@@ -206,16 +236,17 @@ WebHelper::StatusType WebHelper::OpenSocketToHostname( )
     hints.ai_protocol = IPPROTO_TCP;
 
     char port_s[16] = {0};
-    snprintf( port_s, 15, "%d", HTTP_PORT );
+    snprintf( port_s, 15, "%d", current_port );
     
     if(getaddrinfo( url.c_str(), port_s, &hints, &addr_list ) != 0)
         return (status = HOSTNAME_NOT_FOUND_ERROR);
-
     for(struct addrinfo * addr = addr_list; addr != NULL; addr = addr->ai_next)
     {
         sckt = socket( addr->ai_family, addr->ai_socktype, addr->ai_protocol );
         if(sckt < 0)
+        {
             break;
+        }
         else
         {
             freeaddrinfo(addr_list);
@@ -236,9 +267,15 @@ WebHelper::StatusType WebHelper::ConnectSocket()
     }
     if(OpenSocketToHostname() != A_OK)
         return status;
+    
     if(connect(sckt, honstname_addr.ai_addr, honstname_addr.ai_addrlen) < 0)
         return ( status = CONNECTION_ERROR );
     is_connected = true;
+    if((status = socket_handler->Init( sckt )) != A_OK)
+    {
+        return status;
+    }
+
     return (status = A_OK);
 }
 
@@ -246,6 +283,7 @@ WebHelper::StatusType WebHelper::DisconnectSocket()
 {
     if( is_connected )
     {
+        socket_handler->End();
         close( sckt );
         is_connected = false;
         return (status = A_OK);
@@ -309,6 +347,12 @@ std::string WebHelper::GetStatusDescription( StatusType index, WebHelper * web )
     case RESPONSE_BUFFER_FULL_ERROR:
         description = "Cannot store complete response on buffer.";
         break;
+    case SSL_CERTIFICATE_ERROR:
+        description = "Invalid SSL certificate.";
+        break;
+    case SSL_ACCEPT_ERROR:
+        description = "Cannot accept SSL connection.";
+        break;
     case NO_RESPONSE:
         description = "Not response has been received from host.";
         break;
@@ -325,11 +369,10 @@ std::string WebHelper::GetStatusDescription( StatusType index, WebHelper * web )
     return description;
 }
 
-WebHelper::HeaderList WebHelper::ParseHeaders( std::string raw )
+WebHelper::HeaderList WebHelper::ParseHeaders( std::istream &raw_stream )
 {
     HeaderList header_list;
     Header header;
-    std::istringstream raw_stream(raw);
     std::string curr_str;
 
     int 
